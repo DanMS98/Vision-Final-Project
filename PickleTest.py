@@ -4,10 +4,10 @@ import pickle
 
 Index = np.random.randint(200)
 
-pickle_in_imgs = open("imgs.pickle", "rb")
+pickle_in_imgs = open("Dataset/imgs.pickle", "rb")
 X = pickle.load(pickle_in_imgs)
 
-pickle_in_lbls = open("lables.pickle", "rb")
+pickle_in_lbls = open("Dataset/lables.pickle", "rb")
 Y = pickle.load(pickle_in_lbls)
 
 label = "Red" if Y[Index] == 0 else "Blue"
