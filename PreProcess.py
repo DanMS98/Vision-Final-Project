@@ -26,11 +26,11 @@ for features, labels in training_data:
 
 X = np.array(X).reshape(-1, IMAGE_SIZE, IMAGE_SIZE, 3)
 
-X_pickle = open("Dataset/imgs.pickle", "wb")
+X_pickle = open("Dataset/train_x.pickle", "wb")
 pickle.dump(X, X_pickle)
 X_pickle.close()
 
-Y_pickle = open("Dataset/lables.pickle", "wb")
+Y_pickle = open("Dataset/train_y.pickle", "wb")
 pickle.dump(Y, Y_pickle)
 Y_pickle.close()
 
