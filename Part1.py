@@ -3,15 +3,52 @@ import numpy as np
 import os
 import pickle
 # import pybgs as bgs
+import keras
+from keras.layers import Input ,Dense,Activation, Conv2D,AveragePooling2D,Flatten
+from keras.models import Model
+from tensorflow import ConfigProto
+from tensorflow import InteractiveSession
+
+
+def build_model(input_shape):
+    x_input = Input(shape=input_shape, name='input')
+
+    x = Conv2D(filters=16, kernel_size=(2, 2), strides=1, padding='valid', name='conv2')(x_input)
+    x = Activation('relu')(x)
+    x = AveragePooling2D(pool_size=2, strides=2, name='pad2')(x)
+
+    x = Flatten()(x)
+
+    x = Dense(units=120, name='fc_1')(x)
+
+    x = Activation('relu', name='relu_1')(x)
+    # x = Dropout(rate = 0.5)
+
+    x = Dense(units=84, name='fc_2')(x)
+    x = Activation('relu', name='relu_2')(x)
+    # x = Dropout(rate = 0.5)
+
+    outputs = Dense(units=2, name='softmax', activation='softmax')(x)
+
+    model = Model(inputs=x_input, outputs=outputs)
+    model.summary()
+
+    return model
 
 MAPPED_Y_OFFSET = 70
 BOX_END_OFFSET = 5
 BOX_START_OFFSET = 10
+USE_RECOGNITION = True
+GENERATE_DATASET = False
+GENERATE_TEST = False
+APPROXIMATE_NUMBER_OF_DATASET_SAMPLES = 1000
+CURRENT_DIR = os.getcwd()
+PATCH_DIM = (200, 200)
+config = ConfigProto()
+config.gpu_options.allow_growth = True
+session = InteractiveSession(config=config)
 
-GENERATE_DATASET = True
-APPROXIMATE_NUMBER_OF_SAMPLES = 700
 
-generation_finished_flag = False
 cam0_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/test/output.mp4"
 # cam1_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/1/output1.mp4"
 # cam2_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/2/output2.mp4"
@@ -20,22 +57,18 @@ cam0 = cv2.VideoCapture(cam0_addr)
 # cam1 = cv2.VideoCapture(cam1_addr)
 # cam2 = cv2.VideoCapture(cam2_addr)
 
-# output_size = (n, m)
 if False:
     backSub = cv2.createBackgroundSubtractorMOG2()
 else:
     backSub = cv2.createBackgroundSubtractorKNN()
-# background_subtr_method = bgs.SuBSENSE()
 
 fieldImage = cv2.imread("2D_field.png")
 
-CURRENT_DIR = os.getcwd()
-print(CURRENT_DIR)
+generation_finished_flag = False
 
-PATCH_DIM = (200, 200)
 output_size = fieldImage.shape
 n, m, _ = output_size
-print(n, m)
+# print(n, m)
 # field
 p1 = (141, 171)
 p2 = (642, 110)  # until 1004, 63
@@ -56,6 +89,11 @@ closing_kernel = np.ones((3, 3), np.uint8)
 erode_kernel = np.ones((2, 2), np.uint8)
 dataset_index_blue = 0
 dataset_index_red = 0
+
+model = build_model(input_shape=(200, 200, 3))
+model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+# model = keras.models.load_model('Dataset/Model.h5')
+model.load_weights("Dataset/model_weights.h5")
 
 while True:
     fieldImage = cv2.imread("2D_field.png")
@@ -92,42 +130,58 @@ while True:
                 start_point = (left - BOX_START_OFFSET, top - BOX_START_OFFSET)
                 end_point = (left + width + BOX_END_OFFSET, top + height + BOX_END_OFFSET)
                 mappedPoint = (int(centroids[i][0]), int(centroids[i][1] + MAPPED_Y_OFFSET))
+                check_vals = list([start_point[1], end_point[1], start_point[0], end_point[0]])
+                patch = J_copy[start_point[1]:end_point[1], start_point[0]:end_point[0], :]
+
+
                 if GENERATE_DATASET:
-                    check_vals = list([start_point[1], end_point[1], start_point[0], end_point[0]])
                     if all(i >= 0 for i in check_vals):
-                        patch = J_copy[start_point[1]:end_point[1], start_point[0]:end_point[0], :]
                         patch = cv2.resize(patch, PATCH_DIM, interpolation=cv2.INTER_AREA)
-
-
                         hsl = cv2.cvtColor(patch, cv2.COLOR_BGR2HLS)
                         hsl_mask = cv2.inRange(hsl, np.array([0, 185, 0]), np.array([255, 255, 255]))
                         # print("whites:", np.sum(hsl_mask == 255))
+                        # cv2.imshow("Patch", patch)
+                        # cv2.imshow("mask", hsl_mask)
+                        # cv2.waitKey(0)
 
-                        if np.sum(hsl_mask == 255) > 500 and dataset_index_red <= APPROXIMATE_NUMBER_OF_SAMPLES:
+                        if np.sum(hsl_mask == 255) > 120 and dataset_index_red <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
                             print("Generating Red...")
-                            filename = CURRENT_DIR + '/Dataset/Red/' + str(dataset_index_red) + '.png'
+                            subPath = '/Dataset/Test/Red/' if GENERATE_TEST else '/Dataset/Train/Red/'
+                            filename = CURRENT_DIR + subPath + str(dataset_index_red) + '.png'
                             dataset_index_red = dataset_index_red + 1
-                        elif np.sum(hsl_mask == 255) <= 500 and dataset_index_blue <= APPROXIMATE_NUMBER_OF_SAMPLES:
+                        elif np.sum(hsl_mask == 255) <= 500 and dataset_index_blue <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
                             print("Generating Blue...")
-                            filename = CURRENT_DIR + '/Dataset/Blue/' + str(dataset_index_blue) + '.png'
+                            subPath = '/Dataset/Test/Blue/' if GENERATE_TEST else '/Dataset/Train/Blue/'
+                            filename = CURRENT_DIR + subPath + str(dataset_index_blue) + '.png'
                             dataset_index_blue = dataset_index_blue + 1
                         else:
                             if not generation_finished_flag and\
-                                    dataset_index_red > APPROXIMATE_NUMBER_OF_SAMPLES and\
-                                    dataset_index_blue > APPROXIMATE_NUMBER_OF_SAMPLES:
+                                    dataset_index_red > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES and\
+                                    dataset_index_blue > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
                                 generation_finished_flag = True
                                 print("DATASET GENERATION FINISHED.")
-
                         cv2.imwrite(filename, patch)
 
-                cv2.circle(fieldImage, mappedPoint, 8, [0, 0, 255], -1)
-                cv2.circle(mask, (int(centroids[i][0]), int(centroids[i][1])), 5, [0, 0, 255], 2)
+                if USE_RECOGNITION:
+                    if all(i >= 0 for i in check_vals):
+                        patch = cv2.resize(patch, PATCH_DIM, interpolation=cv2.INTER_AREA)
+                        batch = np.expand_dims(patch, axis=0)
+                        prediction = model.predict(batch)
+                        result = np.argmax(prediction[0])
+                        player_color = [255, 0, 0] if result == 1 else [0, 0, 255]
+                    else:
+                        player_color = [0, 0, 255]
+                else:
+                    player_color = [255, 0, 255]
+
+                cv2.circle(fieldImage, mappedPoint, 8, player_color, -1)
+                cv2.circle(mask, (int(centroids[i][0]), int(centroids[i][1])), 5, player_color, 2)
                 cv2.rectangle(J, start_point, end_point, [0, 255, 255], 2)
 
         # cv2.imshow("bgs", mask)
-        cv2.imshow("FieldImage", fieldImage)
-        cv2.imshow("TransformedImage", J)
-        cv2.imshow("originalImage", I0)
+        cv2.imshow("Map", fieldImage)
+        # cv2.imshow("Transformed Image", J)
+        cv2.imshow("Original Image", I0)
         if cv2.waitKey(20) & 0xFF == ord('q'):
             break
     else:
