@@ -115,7 +115,7 @@ GENERATE_DATASET = False
 GENERATE_TEST = False
 USE_MODEL_WEIGHTS = False
 USE_MOG2 = False
-MAPPED_Y_OFFSET = 70
+MAPPED_Y_OFFSET = 40
 BOX_END_OFFSET = 5
 BOX_START_OFFSET = 10
 OPTICALFLOW_FRAME_COUNTER_LIMIT = 8
@@ -148,7 +148,6 @@ generation_finished_flag = False
 
 output_size = fieldImage.shape
 n, m, _ = output_size
-# print(n, m)
 # field
 p1 = (141, 171)
 p2 = (642, 110)  # until 1004, 63
@@ -170,8 +169,12 @@ erode_kernel = np.ones((2, 2), np.uint8)
 dataset_index_blue = 0
 dataset_index_red = 0
 frame_counter = OPTICALFLOW_FRAME_COUNTER_LIMIT
+
+sift_for_flow = cv2.xfeatures2d.SIFT_create()
+
 lk_params = dict(winSize=(30, 30), maxLevel=1,
                  criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.8))
+feature_params = dict(maxCorners=100, qualityLevel=0.3, minDistance=7, blockSize=7)
 
 if USE_RECOGNITION:
     if USE_MODEL_WEIGHTS:
@@ -217,6 +220,14 @@ while True:
 
             old_points = [p[0] for p in old_points_for_flow]
             colors = [p[1] for p in old_points_for_flow]
+            keypoints = [p[2] for p in old_points_for_flow]
+
+            # for kp in keypoints[0]:
+            #     print('-' * 40)
+            #     print('location=(%.2f,%.2f)' % (kp.pt[0], kp.pt[1]))
+            #     print('orientation angle=%1.1f' % kp.angle)
+            #     print('scale=%f' % kp.size)
+
             frame_gray = cv2.cvtColor(J_copy, cv2.COLOR_BGR2GRAY)
             old_gray = cv2.cvtColor(old_frame1, cv2.COLOR_BGR2GRAY)
             old_pts = np.array([old_points], dtype="float32").reshape(-1, 1, 2)
@@ -249,12 +260,10 @@ while True:
                 else:
                     area_limit = BASE_AREA_LIMIT * 3
 
-
                 if area > area_limit:
                     start_point = (left - BOX_START_OFFSET, top - BOX_START_OFFSET)
                     end_point = (left + width + BOX_END_OFFSET, top + height + BOX_END_OFFSET)
                     mapped_point_offset = (int(centroids[i][0]), int(centroids[i][1] + MAPPED_Y_OFFSET))
-                    # old_points_for_flow.append(mapped_point_offset)
                     check_vals = list([start_point[1], end_point[1], start_point[0], end_point[0]])
                     patch = J_copy[start_point[1]:end_point[1], start_point[0]:end_point[0], :]
 
@@ -299,7 +308,13 @@ while True:
                     else:
                         player_color = [0, 255, 255]
 
-                    old_points_for_flow.append([mapped_point_offset, player_color])
+                    keypoints = sift_for_flow.detect(patch, None)
+
+                    # gray_patch = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
+                    # cv2.drawKeypoints(patch, keypoints, gray_patch, flags=cv2.DRAW_MATCHES_FLAGS_DRAW_RICH_KEYPOINTS)
+
+                    old_points_for_flow.append([mapped_point_offset, player_color, keypoints])
+
                     cv2.circle(fieldImage, mapped_point_offset, 8, player_color, -1)
                     cv2.circle(mask, (int(centroids[i][0]), int(centroids[i][1])), 5, player_color, 2)
                     cv2.rectangle(J, start_point, end_point, [0, 255, 255], 2)
@@ -311,7 +326,6 @@ while True:
         # cv2.imshow("Original Image0", I0)
         # cv2.imshow("Original Image2", I2)
         # cv2.imshow("stitch01 ", stitch01)
-        # cv2.imshow("stitch12 ", stitch)
 
         if cv2.waitKey(20) & 0xFF == ord('q'):
             break
