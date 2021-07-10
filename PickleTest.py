@@ -53,6 +53,8 @@ pickle_in_imgs.close()
 pickle_in_lbls = open("Dataset/Train/train_y.pickle", "rb")
 Y = pickle.load(pickle_in_lbls)
 pickle_in_lbls.close()
+
+
 model = keras.models.load_model('Dataset/Model.h5')
 
 # print(X.shape, len(Y))
@@ -63,7 +65,12 @@ while True:
     prediction = model.predict(batch)
     print(np.argmax(prediction[0]))
     # label = "Label"
-    label = "Red" if Y[Index] == 0 else "Blue"
+    if Y[Index] == 0:
+        label = "Red"
+    elif Y[Index] == 1:
+        label = "Blue"
+    else:
+        label = "Yellow"
     cv2.imshow(label, X[Index])
     if cv2.waitKey(0) & 0xFF == ord('q'):
         break

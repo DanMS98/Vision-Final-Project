@@ -2,12 +2,54 @@ import cv2
 import numpy as np
 import os
 import pickle
-# import pybgs as bgs
 import keras
-from keras.layers import Input ,Dense,Activation, Conv2D,AveragePooling2D,Flatten
+from keras.layers import Input, Dense, Activation, Conv2D, AveragePooling2D, Flatten
 from keras.models import Model
 from tensorflow import ConfigProto
 from tensorflow import InteractiveSession
+
+
+class Stitcher:
+    def __init__(self):
+        self.sift = cv2.xfeatures2d.SIFT_create()
+        self.cachedH = None
+
+    def stitch(self, images, ratio=0.75, reprojThresh=4.0):
+
+        (imageB, imageA) = images
+        if self.cachedH is None:
+            (kpsA, featuresA) = self.sift.detectAndCompute(imageA, None)
+            (kpsB, featuresB) = self.sift.detectAndCompute(imageB, None)
+            matches = cv2.BFMatcher().knnMatch(featuresA, featuresB, k=2)
+            good_matches = []
+            alpha = 0.75
+            for m1, m2 in matches:
+                if m1.distance < alpha * m2.distance:
+                    good_matches.append(m1)
+
+            points1 = np.array([kpsA[m.queryIdx].pt for m in good_matches], dtype=np.float32)
+            points2 = np.array([kpsB[m.trainIdx].pt for m in good_matches], dtype=np.float32)
+            H, mask = cv2.findHomography(points1, points2, cv2.RANSAC, 5.0)
+            self.cachedH = H
+
+        result = cv2.warpPerspective(imageA, self.cachedH, (imageA.shape[1] + imageB.shape[1], imageA.shape[0]))
+        result[0:imageB.shape[0], 0:imageB.shape[1]] = imageB
+        return result
+
+
+def get_result_from_model(patch, model):
+    patch = cv2.resize(patch, PATCH_DIM, interpolation=cv2.INTER_AREA)
+    batch = np.expand_dims(patch, axis=0)
+    prediction = model.predict(batch)
+    # print(prediction[0])
+    result = np.argmax(prediction[0])
+    if result == 0:
+        player_color = [0, 0, 255]
+    elif result == 1:
+        player_color = [255, 0, 0]
+    else:
+        player_color = [255, 255, 0]
+    return player_color
 
 
 def build_model(input_shape):
@@ -35,34 +77,68 @@ def build_model(input_shape):
 
     return model
 
+
+def stitch_frames(I0, I1, I2):
+    stitcher01 = Stitcher()
+    stitcher12 = Stitcher()
+    stitcher = Stitcher()
+
+    frames_01 = []
+    frames_12 = []
+    frames_01.append(I0)
+    frames_01.append(I1)
+
+    frames_12.append(I1)
+    frames_12.append(I2)
+
+    stitch01 = stitcher01.stitch(frames_01)
+    stitch01 = cv2.resize(stitch01, (I0.shape[1], I0.shape[0]), interpolation=cv2.INTER_AREA)
+
+    stitch12 = stitcher12.stitch(frames_12)
+    stitch12 = cv2.resize(stitch12, (I0.shape[1], I0.shape[0]), interpolation=cv2.INTER_AREA)
+
+    last_stitch = [stitch01, stitch12]
+
+    stitch = stitcher.stitch(last_stitch)
+    stitch = cv2.resize(stitch, (I0.shape[1], I0.shape[0]), interpolation=cv2.INTER_AREA)
+
+    return stitch
+
+
 MAPPED_Y_OFFSET = 70
 BOX_END_OFFSET = 5
 BOX_START_OFFSET = 10
+OPTICALFLOW_FRAME_COUNTER_LIMIT = 15
+USE_STITCHING = False
 USE_RECOGNITION = True
+USE_OPTICAL_FLOW = False
 GENERATE_DATASET = False
 GENERATE_TEST = False
-APPROXIMATE_NUMBER_OF_DATASET_SAMPLES = 1000
+USE_MODEL_WEIGHTS = False
+USE_MOG2 = False
+APPROXIMATE_NUMBER_OF_DATASET_SAMPLES = 1300
 CURRENT_DIR = os.getcwd()
 PATCH_DIM = (200, 200)
+
 config = ConfigProto()
 config.gpu_options.allow_growth = True
 session = InteractiveSession(config=config)
 
+cam1_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/main/output.mp4"
+cam0_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/cam0/output0.mp4"
+cam2_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/cam2/output2.mp4"
 
-cam0_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/test/output.mp4"
-# cam1_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/1/output1.mp4"
-# cam2_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/2/output2.mp4"
+fieldImage = cv2.imread("2D_field.png")
 
+cam1 = cv2.VideoCapture(cam1_addr)
 cam0 = cv2.VideoCapture(cam0_addr)
-# cam1 = cv2.VideoCapture(cam1_addr)
-# cam2 = cv2.VideoCapture(cam2_addr)
+cam2 = cv2.VideoCapture(cam2_addr)
 
-if False:
+if USE_MOG2:
     backSub = cv2.createBackgroundSubtractorMOG2()
 else:
     backSub = cv2.createBackgroundSubtractorKNN()
 
-fieldImage = cv2.imread("2D_field.png")
 
 generation_finished_flag = False
 
@@ -89,27 +165,32 @@ closing_kernel = np.ones((3, 3), np.uint8)
 erode_kernel = np.ones((2, 2), np.uint8)
 dataset_index_blue = 0
 dataset_index_red = 0
+frame_counter = OPTICALFLOW_FRAME_COUNTER_LIMIT
 
-model = build_model(input_shape=(200, 200, 3))
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-# model = keras.models.load_model('Dataset/Model.h5')
-model.load_weights("Dataset/model_weights.h5")
+if USE_RECOGNITION:
+    if USE_MODEL_WEIGHTS:
+        model = build_model(input_shape=(200, 200, 3))
+        model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+        model.load_weights("Dataset/model_weights.h5")
+    else:
+        model = keras.models.load_model('Dataset/Model.h5')
+
 
 while True:
     fieldImage = cv2.imread("2D_field.png")
-    # cv2.line(fieldImage, (0, 0), (380, 665), (100, 50, 200), 5)
-    # cv2.line(fieldImage, (1049, 43), (601, 665), (100, 50, 200), 5)
+    ret1, I1 = cam1.read()
     ret0, I0 = cam0.read()
-    # ret1, I1 = cam1.read()
-    # ret2, I2 = cam2.read()
-    ret = ret0  # & ret1 & ret2
-
+    ret2, I2 = cam2.read()
+    ret = ret0 & ret1 & ret2
     if ret:
+        if USE_STITCHING:
+            I1 = stitch_frames(I0, I1, I2)
+
         # for i in range(4):
         #     cv2.circle(I0, (points1[i, 0], points1[i, 1]), 5, [0, 0, i*50], 2)
 
         H = cv2.getPerspectiveTransform(points1, points2)
-        J = cv2.warpPerspective(I0, H, (output_size[1], output_size[0]))
+        J = cv2.warpPerspective(I1, H, (output_size[1], output_size[0]))
         # J = cv2.GaussianBlur(J, (7, 7), 0)
         J = J[34:, :, :]
         J_copy = J.copy()
@@ -133,7 +214,6 @@ while True:
                 check_vals = list([start_point[1], end_point[1], start_point[0], end_point[0]])
                 patch = J_copy[start_point[1]:end_point[1], start_point[0]:end_point[0], :]
 
-
                 if GENERATE_DATASET:
                     if all(i >= 0 for i in check_vals):
                         patch = cv2.resize(patch, PATCH_DIM, interpolation=cv2.INTER_AREA)
@@ -144,44 +224,58 @@ while True:
                         # cv2.imshow("mask", hsl_mask)
                         # cv2.waitKey(0)
 
-                        if np.sum(hsl_mask == 255) > 120 and dataset_index_red <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
+                        if np.sum(hsl_mask == 255) > 500 and dataset_index_red <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
                             print("Generating Red...")
                             subPath = '/Dataset/Test/Red/' if GENERATE_TEST else '/Dataset/Train/Red/'
                             filename = CURRENT_DIR + subPath + str(dataset_index_red) + '.png'
                             dataset_index_red = dataset_index_red + 1
-                        elif np.sum(hsl_mask == 255) <= 500 and dataset_index_blue <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
+
+                        elif np.sum(hsl_mask == 255) <= 500 and\
+                                dataset_index_blue <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
                             print("Generating Blue...")
                             subPath = '/Dataset/Test/Blue/' if GENERATE_TEST else '/Dataset/Train/Blue/'
                             filename = CURRENT_DIR + subPath + str(dataset_index_blue) + '.png'
                             dataset_index_blue = dataset_index_blue + 1
+
                         else:
                             if not generation_finished_flag and\
                                     dataset_index_red > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES and\
                                     dataset_index_blue > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
                                 generation_finished_flag = True
                                 print("DATASET GENERATION FINISHED.")
+
                         cv2.imwrite(filename, patch)
 
                 if USE_RECOGNITION:
-                    if all(i >= 0 for i in check_vals):
-                        patch = cv2.resize(patch, PATCH_DIM, interpolation=cv2.INTER_AREA)
-                        batch = np.expand_dims(patch, axis=0)
-                        prediction = model.predict(batch)
-                        result = np.argmax(prediction[0])
-                        player_color = [255, 0, 0] if result == 1 else [0, 0, 255]
+                    if USE_OPTICAL_FLOW:
+                        if frame_counter >= OPTICALFLOW_FRAME_COUNTER_LIMIT:
+                            frame_counter = 0
+                            player_color = get_result_from_model(patch, model)
+                        else:
+                            frame_counter = frame_counter + 1
+
                     else:
-                        player_color = [0, 0, 255]
+                        if all(i >= 0 for i in check_vals):
+                            player_color = get_result_from_model(patch, model)
+                        else:
+                            player_color = [0, 0, 255]
+
                 else:
-                    player_color = [255, 0, 255]
+                    player_color = [100, 10, 255]
 
                 cv2.circle(fieldImage, mappedPoint, 8, player_color, -1)
                 cv2.circle(mask, (int(centroids[i][0]), int(centroids[i][1])), 5, player_color, 2)
                 cv2.rectangle(J, start_point, end_point, [0, 255, 255], 2)
 
         # cv2.imshow("bgs", mask)
+        cv2.imshow("Transformed Image", J)
+        cv2.imshow("Original Image1", I1)
         cv2.imshow("Map", fieldImage)
-        # cv2.imshow("Transformed Image", J)
-        cv2.imshow("Original Image", I0)
+        # cv2.imshow("Original Image0", I0)
+        # cv2.imshow("Original Image2", I2)
+        # cv2.imshow("stitch01 ", stitch01)
+        # cv2.imshow("stitch12 ", stitch)
+
         if cv2.waitKey(20) & 0xFF == ord('q'):
             break
     else:

@@ -7,7 +7,7 @@ import pickle
 IMAGE_SIZE = 200
 TRAIN_DATASET = True
 CURRENT_DIR = os.getcwd()
-CATEGORIES = ["Red", "Blue"]
+CATEGORIES = ["Red", "Blue", "Yellow"]
 CURRENT_DIR = os.path.join(CURRENT_DIR, "Dataset")
 sub_dir = "Train" if TRAIN_DATASET else "Test"
 CURRENT_DIR = os.path.join(CURRENT_DIR, sub_dir)
