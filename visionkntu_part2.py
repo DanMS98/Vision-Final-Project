@@ -18,7 +18,7 @@ import tensorflow as tf
 import pickle 
 
 from keras.datasets import mnist
-from keras.layers import Input ,Dense,Activation, Conv2D,AveragePooling2D,Flatten
+from keras.layers import Input, Dense,Activation, Conv2D, AveragePooling2D, Flatten, Dropout
 from keras.models import Model
 from keras.utils import to_categorical
 from keras.preprocessing.image import ImageDataGenerator
@@ -79,23 +79,27 @@ def build_model(input_shape):
   
   x_input = Input(shape =input_shape,name = 'input')
 
+  x = Conv2D(filters = 6,kernel_size = 5, strides = 1, padding = 'valid',name = 'conv1')(x_input)
+  x = Activation('relu', name = 'relu_1')(x)
+  x = AveragePooling2D(pool_size =2,strides = 2,name = 'pad1')(x)
+
   x = Conv2D(filters = 16,kernel_size = (2,2), strides = 1, padding = 'valid',name = 'conv2')(x_input)
-  x = Activation('relu')(x)
+  x = Activation('relu', name = 'relu_2')(x)
   x = AveragePooling2D(pool_size =2,strides = 2,name = 'pad2')(x)
 
   x = Flatten()(x)
 
   x = Dense(units = 120, name = 'fc_1')(x)
 
-  x = Activation('relu', name = 'relu_1')(x)
-  # x = Dropout(rate = 0.5)
+  x = Activation('relu', name = 'relu_3')(x)
+  # x = Dropout(rate = 0.3)
 
   x = Dense(units = 84, name = 'fc_2')(x)
-  x = Activation('relu', name = 'relu_2')(x)
-  # x = Dropout(rate = 0.5)
+  x = Activation('relu', name = 'relu_4')(x)
+  # x = Dropout(rate = 0.3)
 
 
-  outputs = Dense(units = 2,name = 'softmax', activation='softmax')(x)
+  outputs = Dense(units = 3,name = 'softmax', activation='softmax')(x)
   
   model = Model(inputs = x_input, outputs = outputs)
   model.summary()
@@ -117,7 +121,7 @@ batch_size = 64
  
 H = model.fit_generator(datagen.flow(train_x, train_y, batch_size=batch_size),
   validation_data=(test_x, test_y),                       
-	steps_per_epoch=len(train_y) // batch_size, epochs=22)
+	steps_per_epoch=len(train_y) // batch_size, epochs=16)
 
 print(H.history.keys())
 #  "Accuracy"
@@ -137,7 +141,7 @@ plt.xlabel('epoch')
 plt.legend(['train', 'validation'], loc='upper left')
 plt.show()
 
-sample = test_x[np.random.randint(len(test_x))]
+sample = train_x[np.random.randint(len(train_x))]
 
 
 batch = np.expand_dims(sample, axis=0)

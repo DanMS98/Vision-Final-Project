@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import os
-import pickle
 import keras
 from keras.layers import Input, Dense, Activation, Conv2D, AveragePooling2D, Flatten
 from keras.models import Model
@@ -44,33 +43,37 @@ def get_result_from_model(patch, model):
     # print(prediction[0])
     result = np.argmax(prediction[0])
     if result == 0:
-        player_color = [0, 0, 255]
+        color = [0, 0, 255]
     elif result == 1:
-        player_color = [255, 0, 0]
+        color = [255, 0, 0]
     else:
-        player_color = [255, 255, 0]
-    return player_color
+        color = [0, 255, 255]
+    return color
 
 
 def build_model(input_shape):
     x_input = Input(shape=input_shape, name='input')
 
+    x = Conv2D(filters=6, kernel_size=5, strides=1, padding='valid', name='conv1')(x_input)
+    x = Activation('relu', name='relu_1')(x)
+    x = AveragePooling2D(pool_size=2, strides=2, name='pad1')(x)
+
     x = Conv2D(filters=16, kernel_size=(2, 2), strides=1, padding='valid', name='conv2')(x_input)
-    x = Activation('relu')(x)
+    x = Activation('relu', name='relu_2')(x)
     x = AveragePooling2D(pool_size=2, strides=2, name='pad2')(x)
 
     x = Flatten()(x)
 
     x = Dense(units=120, name='fc_1')(x)
 
-    x = Activation('relu', name='relu_1')(x)
-    # x = Dropout(rate = 0.5)
+    x = Activation('relu', name='relu_3')(x)
+    # x = Dropout(rate = 0.3)
 
     x = Dense(units=84, name='fc_2')(x)
-    x = Activation('relu', name='relu_2')(x)
-    # x = Dropout(rate = 0.5)
+    x = Activation('relu', name='relu_4')(x)
+    # x = Dropout(rate = 0.3)
 
-    outputs = Dense(units=2, name='softmax', activation='softmax')(x)
+    outputs = Dense(units=3, name='softmax', activation='softmax')(x)
 
     model = Model(inputs=x_input, outputs=outputs)
     model.summary()
@@ -105,17 +108,18 @@ def stitch_frames(I0, I1, I2):
     return stitch
 
 
-MAPPED_Y_OFFSET = 70
-BOX_END_OFFSET = 5
-BOX_START_OFFSET = 10
-OPTICALFLOW_FRAME_COUNTER_LIMIT = 15
 USE_STITCHING = False
 USE_RECOGNITION = True
-USE_OPTICAL_FLOW = False
+USE_OPTICAL_FLOW = True
 GENERATE_DATASET = False
 GENERATE_TEST = False
 USE_MODEL_WEIGHTS = False
 USE_MOG2 = False
+MAPPED_Y_OFFSET = 70
+BOX_END_OFFSET = 5
+BOX_START_OFFSET = 10
+OPTICALFLOW_FRAME_COUNTER_LIMIT = 8
+BASE_AREA_LIMIT = 50
 APPROXIMATE_NUMBER_OF_DATASET_SAMPLES = 1300
 CURRENT_DIR = os.getcwd()
 PATCH_DIM = (200, 200)
@@ -166,6 +170,8 @@ erode_kernel = np.ones((2, 2), np.uint8)
 dataset_index_blue = 0
 dataset_index_red = 0
 frame_counter = OPTICALFLOW_FRAME_COUNTER_LIMIT
+lk_params = dict(winSize=(30, 30), maxLevel=1,
+                 criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.8))
 
 if USE_RECOGNITION:
     if USE_MODEL_WEIGHTS:
@@ -175,7 +181,10 @@ if USE_RECOGNITION:
     else:
         model = keras.models.load_model('Dataset/Model.h5')
 
-
+_, old_frame1 = cam1.read()
+_, old_frame0 = cam0.read()
+_, old_frame2 = cam2.read()
+old_points_for_flow = []
 while True:
     fieldImage = cv2.imread("2D_field.png")
     ret1, I1 = cam1.read()
@@ -204,70 +213,98 @@ while True:
         # mask = cv2.erode(mask, erode_kernel)
 
         n, C, stats, centroids = cv2.connectedComponentsWithStats(mask)
+        if USE_OPTICAL_FLOW and frame_counter < OPTICALFLOW_FRAME_COUNTER_LIMIT:
 
-        for i in range(1, n):
-            left, top, width, height, area = stats[i][0], stats[i][1], stats[i][2], stats[i][3], stats[i][4]
-            if area > 150:
-                start_point = (left - BOX_START_OFFSET, top - BOX_START_OFFSET)
-                end_point = (left + width + BOX_END_OFFSET, top + height + BOX_END_OFFSET)
-                mappedPoint = (int(centroids[i][0]), int(centroids[i][1] + MAPPED_Y_OFFSET))
-                check_vals = list([start_point[1], end_point[1], start_point[0], end_point[0]])
-                patch = J_copy[start_point[1]:end_point[1], start_point[0]:end_point[0], :]
+            old_points = [p[0] for p in old_points_for_flow]
+            colors = [p[1] for p in old_points_for_flow]
+            frame_gray = cv2.cvtColor(J_copy, cv2.COLOR_BGR2GRAY)
+            old_gray = cv2.cvtColor(old_frame1, cv2.COLOR_BGR2GRAY)
+            old_pts = np.array([old_points], dtype="float32").reshape(-1, 1, 2)
+            new_points, st, err = cv2.calcOpticalFlowPyrLK(old_gray, frame_gray, old_pts,
+                                                           None, **lk_params)
 
-                if GENERATE_DATASET:
-                    if all(i >= 0 for i in check_vals):
-                        patch = cv2.resize(patch, PATCH_DIM, interpolation=cv2.INTER_AREA)
-                        hsl = cv2.cvtColor(patch, cv2.COLOR_BGR2HLS)
-                        hsl_mask = cv2.inRange(hsl, np.array([0, 185, 0]), np.array([255, 255, 255]))
-                        # print("whites:", np.sum(hsl_mask == 255))
-                        # cv2.imshow("Patch", patch)
-                        # cv2.imshow("mask", hsl_mask)
-                        # cv2.waitKey(0)
+            frame_counter = frame_counter + 1
+            for i, point in enumerate(new_points):
+                # print(point[0])
+                cv2.circle(fieldImage, (point[0][0], point[0][1]), 8, colors[i], -1)
+                # cv2.circle(mask, point, 5, player_color, 2)
+                cv2.circle(J, (point[0][0], point[0][1]), 8, colors[i], -1)
 
-                        if np.sum(hsl_mask == 255) > 500 and dataset_index_red <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
-                            print("Generating Red...")
-                            subPath = '/Dataset/Test/Red/' if GENERATE_TEST else '/Dataset/Train/Red/'
-                            filename = CURRENT_DIR + subPath + str(dataset_index_red) + '.png'
-                            dataset_index_red = dataset_index_red + 1
+        else:
+            old_frame1 = J_copy
+            frame_counter = 0
+            old_points_for_flow = []
+            for i in range(1, n):
+                left, top, width, height, area = stats[i][0], stats[i][1], stats[i][2], stats[i][3], stats[i][4]
+                # if top < I1.shape[0]//4:
+                #     area_limit = BASE_AREA_LIMIT * 4
+                # if I1.shape[0]//4 < top < I1.shape[0]//2:
+                #     area_limit = BASE_AREA_LIMIT * 3
+                # if I1.shape[0]//2 < top < 2*I1.shape[0]//3:
+                #     area_limit = BASE_AREA_LIMIT * 2
+                # if 2*I1.shape[0]//3 < top:
+                #     area_limit = BASE_AREA_LIMIT * 1
+                if top > 500:
+                    area_limit = BASE_AREA_LIMIT
+                else:
+                    area_limit = BASE_AREA_LIMIT * 3
 
-                        elif np.sum(hsl_mask == 255) <= 500 and\
-                                dataset_index_blue <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
-                            print("Generating Blue...")
-                            subPath = '/Dataset/Test/Blue/' if GENERATE_TEST else '/Dataset/Train/Blue/'
-                            filename = CURRENT_DIR + subPath + str(dataset_index_blue) + '.png'
-                            dataset_index_blue = dataset_index_blue + 1
 
-                        else:
-                            if not generation_finished_flag and\
-                                    dataset_index_red > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES and\
-                                    dataset_index_blue > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
-                                generation_finished_flag = True
-                                print("DATASET GENERATION FINISHED.")
+                if area > area_limit:
+                    start_point = (left - BOX_START_OFFSET, top - BOX_START_OFFSET)
+                    end_point = (left + width + BOX_END_OFFSET, top + height + BOX_END_OFFSET)
+                    mapped_point_offset = (int(centroids[i][0]), int(centroids[i][1] + MAPPED_Y_OFFSET))
+                    # old_points_for_flow.append(mapped_point_offset)
+                    check_vals = list([start_point[1], end_point[1], start_point[0], end_point[0]])
+                    patch = J_copy[start_point[1]:end_point[1], start_point[0]:end_point[0], :]
 
-                        cv2.imwrite(filename, patch)
+                    if GENERATE_DATASET:
+                        if all(i >= 0 for i in check_vals):
+                            patch = cv2.resize(patch, PATCH_DIM, interpolation=cv2.INTER_AREA)
+                            hsl = cv2.cvtColor(patch, cv2.COLOR_BGR2HLS)
+                            hsl_mask = cv2.inRange(hsl, np.array([0, 185, 0]), np.array([255, 255, 255]))
+                            # print(area_limit)
+                            # print("whites:", np.sum(hsl_mask == 255))
+                            # cv2.imshow("Patch", patch)
+                            # cv2.imshow("mask", hsl_mask)
+                            # cv2.waitKey(0)
 
-                if USE_RECOGNITION:
-                    if USE_OPTICAL_FLOW:
-                        if frame_counter >= OPTICALFLOW_FRAME_COUNTER_LIMIT:
-                            frame_counter = 0
-                            player_color = get_result_from_model(patch, model)
-                        else:
-                            frame_counter = frame_counter + 1
+                            if np.sum(hsl_mask == 255) > 500 and dataset_index_red <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
+                                print("Generating Red...")
+                                subPath = '/Dataset/Test/Red/' if GENERATE_TEST else '/Dataset/Train/Red/'
+                                filename = CURRENT_DIR + subPath + str(dataset_index_red) + '.png'
+                                dataset_index_red = dataset_index_red + 1
 
-                    else:
+                            elif np.sum(hsl_mask == 255) <= 500 and\
+                                    dataset_index_blue <= APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
+                                print("Generating Blue...")
+                                subPath = '/Dataset/Test/Blue/' if GENERATE_TEST else '/Dataset/Train/Blue/'
+                                filename = CURRENT_DIR + subPath + str(dataset_index_blue) + '.png'
+                                dataset_index_blue = dataset_index_blue + 1
+
+                            else:
+                                if not generation_finished_flag and\
+                                        dataset_index_red > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES and\
+                                        dataset_index_blue > APPROXIMATE_NUMBER_OF_DATASET_SAMPLES:
+                                    generation_finished_flag = True
+                                    print("DATASET GENERATION FINISHED.")
+
+                            cv2.imwrite(filename, patch)
+
+                    if USE_RECOGNITION:
                         if all(i >= 0 for i in check_vals):
                             player_color = get_result_from_model(patch, model)
                         else:
                             player_color = [0, 0, 255]
+                    else:
+                        player_color = [0, 255, 255]
 
-                else:
-                    player_color = [100, 10, 255]
+                    old_points_for_flow.append([mapped_point_offset, player_color])
+                    cv2.circle(fieldImage, mapped_point_offset, 8, player_color, -1)
+                    cv2.circle(mask, (int(centroids[i][0]), int(centroids[i][1])), 5, player_color, 2)
+                    cv2.rectangle(J, start_point, end_point, [0, 255, 255], 2)
 
-                cv2.circle(fieldImage, mappedPoint, 8, player_color, -1)
-                cv2.circle(mask, (int(centroids[i][0]), int(centroids[i][1])), 5, player_color, 2)
-                cv2.rectangle(J, start_point, end_point, [0, 255, 255], 2)
-
-        # cv2.imshow("bgs", mask)
+        cv2.imshow("bgs", mask)
         cv2.imshow("Transformed Image", J)
         cv2.imshow("Original Image1", I1)
         cv2.imshow("Map", fieldImage)

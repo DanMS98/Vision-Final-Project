@@ -1,40 +1,10 @@
 import cv2
 import numpy as np
 import pickle
-import pickle
 import keras
-from keras.layers import Input ,Dense,Activation, Conv2D,AveragePooling2D,Flatten
-from keras.models import Model
 from tensorflow import ConfigProto
 from tensorflow import InteractiveSession
 
-
-
-
-def build_model(input_shape):
-    x_input = Input(shape=input_shape, name='input')
-
-    x = Conv2D(filters=16, kernel_size=(2, 2), strides=1, padding='valid', name='conv2')(x_input)
-    x = Activation('relu')(x)
-    x = AveragePooling2D(pool_size=2, strides=2, name='pad2')(x)
-
-    x = Flatten()(x)
-
-    x = Dense(units=120, name='fc_1')(x)
-
-    x = Activation('relu', name='relu_1')(x)
-    # x = Dropout(rate = 0.5)
-
-    x = Dense(units=84, name='fc_2')(x)
-    x = Activation('relu', name='relu_2')(x)
-    # x = Dropout(rate = 0.5)
-
-    outputs = Dense(units=2, name='softmax', activation='softmax')(x)
-
-    model = Model(inputs=x_input, outputs=outputs)
-    model.summary()
-
-    return model
 
 config = ConfigProto()
 config.gpu_options.allow_growth = True
@@ -43,8 +13,8 @@ session = InteractiveSession(config=config)
 
 USE_TEST = False
 
-model = build_model(input_shape=(200, 200, 3))
-model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+# model = build_model(input_shape=(200, 200, 3))
+# model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
 pickle_in_imgs = open("Dataset/Train/train_x.pickle", "rb")
 X = pickle.load(pickle_in_imgs)
