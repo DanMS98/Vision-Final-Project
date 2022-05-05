@@ -3,6 +3,7 @@
 /test1
 /Dataset
 Model.h5
+token
 model_weights.h5
 /Dataset/Train/train_x.pickle
 *.pickle
