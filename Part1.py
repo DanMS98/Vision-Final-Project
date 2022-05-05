@@ -1,11 +1,16 @@
 import cv2
 import numpy as np
 import os
-import keras
-from keras.layers import Input, Dense, Activation, Conv2D, AveragePooling2D, Flatten
-from keras.models import Model
-from tensorflow import ConfigProto
-from tensorflow import InteractiveSession
+# import keras
+# from tensorflow import keras 
+# from keras.layers import Input, Dense, Activation, Conv2D, AveragePooling2D, Flatten
+# from keras.models import Model
+from tensorflow.keras.models import Model
+from tensorflow.keras.layers import Input, Dense, Activation, Conv2D, AveragePooling2D, Flatten
+from tensorflow.keras.models import Model
+# from tensorflow import ConfigProto
+# from tensorflow import InteractiveSession
+import tensorflow as tf
 
 
 class Stitcher:
@@ -107,7 +112,7 @@ def stitch_frames(I0, I1, I2):
 
     return stitch
 
-
+print(cv2.__version__)
 USE_STITCHING = False
 USE_RECOGNITION = True
 USE_OPTICAL_FLOW = True
@@ -124,11 +129,12 @@ APPROXIMATE_NUMBER_OF_DATASET_SAMPLES = 1300
 CURRENT_DIR = os.getcwd()
 PATCH_DIM = (200, 200)
 
-config = ConfigProto()
+config =  tf.compat.v1.ConfigProto()
 config.gpu_options.allow_growth = True
-session = InteractiveSession(config=config)
+# session = InteractiveSession(config=config)
+session = tf.compat.v1.InteractiveSession(config=config)
 
-cam1_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/main/output.mp4"
+cam1_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/test34/output.h264"
 cam0_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/cam0/output0.mp4"
 cam2_addr = "/home/danial/PycharmProjects/VisionCourse_kntu/Project/FirstHalf/cam2/output2.mp4"
 
@@ -164,13 +170,14 @@ points1 = np.array([p1, p2, p3, p4], dtype=np.float32)
 points2 = np.array([p1_2, p2_2, p3_2, p4_2], dtype=np.float32)
 
 opening_kernel = np.ones((2, 2), np.uint8)
-closing_kernel = np.ones((3, 3), np.uint8)
+closing_kernel = np.ones((4, 4), np.uint8)
 erode_kernel = np.ones((2, 2), np.uint8)
 dataset_index_blue = 0
 dataset_index_red = 0
 frame_counter = OPTICALFLOW_FRAME_COUNTER_LIMIT
 
-sift_for_flow = cv2.xfeatures2d.SIFT_create()
+# sift_for_flow = cv2.xfeatures2d.SIFT_create()
+sift_for_flow = cv2.SIFT_create()
 
 lk_params = dict(winSize=(30, 30), maxLevel=1,
                  criteria=(cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 30, 0.8))
@@ -182,12 +189,13 @@ if USE_RECOGNITION:
         model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
         model.load_weights("Dataset/model_weights.h5")
     else:
-        model = keras.models.load_model('Dataset/Model.h5')
+        model = tf.keras.models.load_model('Dataset/Model.h5')
 
 _, old_frame1 = cam1.read()
 _, old_frame0 = cam0.read()
 _, old_frame2 = cam2.read()
 old_points_for_flow = []
+
 while True:
     fieldImage = cv2.imread("2D_field.png")
     ret1, I1 = cam1.read()
@@ -199,7 +207,7 @@ while True:
             I1 = stitch_frames(I0, I1, I2)
 
         # for i in range(4):
-        #     cv2.circle(I0, (points1[i, 0], points1[i, 1]), 5, [0, 0, i*50], 2)
+        #     cv2.circle(I1, (points1[i, 0], points1[i, 1]), 5, [0, 0, i*50], 2)
 
         H = cv2.getPerspectiveTransform(points1, points2)
         J = cv2.warpPerspective(I1, H, (output_size[1], output_size[0]))
@@ -210,7 +218,7 @@ while True:
         mask = backSub.apply(J)
 
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, opening_kernel)
-        # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, closing_kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, closing_kernel)
         threshold = 200
         ret, mask = cv2.threshold(mask, threshold, 255, cv2.THRESH_BINARY)
         # mask = cv2.erode(mask, erode_kernel)
@@ -237,9 +245,9 @@ while True:
             frame_counter = frame_counter + 1
             for i, point in enumerate(new_points):
                 # print(point[0])
-                cv2.circle(fieldImage, (point[0][0], point[0][1]), 8, colors[i], -1)
+                cv2.circle(fieldImage, (int(point[0][0]), int(point[0][1])), 8, colors[i], -1)
                 # cv2.circle(mask, point, 5, player_color, 2)
-                cv2.circle(J, (point[0][0], point[0][1]), 8, colors[i], -1)
+                cv2.circle(J, (int(point[0][0]), int(point[0][1])), 8, colors[i], -1)
 
         else:
             old_frame1 = J_copy

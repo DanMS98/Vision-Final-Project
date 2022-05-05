@@ -18,14 +18,14 @@ import tensorflow as tf
 import pickle 
 
 from keras.datasets import mnist
-from keras.layers import Input, Dense,Activation, Conv2D, AveragePooling2D, Flatten, Dropout
+from keras.layers import Input, Dense, Activation, Conv2D, AveragePooling2D, Flatten, Dropout
 from keras.models import Model
 from keras.utils import to_categorical
 from keras.preprocessing.image import ImageDataGenerator
 
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
-get_ipython().magic(u'matplotlib inline')
+# get_ipython().magic(u'matplotlib inline')
 
 def load_dataset():
 
@@ -58,7 +58,7 @@ def load_dataset_train():
   return (X, Y)
 
 (x_train, y_train) = load_dataset_train()
-train_x, test_x, train_y, test_y  = train_test_split(x_train, y_train , test_size=0.1, shuffle=True, random_state=5)
+train_x, test_x, train_y, test_y  = train_test_split(x_train, y_train, test_size=0.1, shuffle=True, random_state=5)
 image_size = x_train.shape[1]
 
 x_train = x_train.astype('float32')/255
@@ -70,7 +70,7 @@ print(x_train.shape)
 train_y = to_categorical(train_y)
 test_y = to_categorical(test_y)
 
-print("train_x shape is {}".format( train_x.shape ))
+print("train_x shape is {}".format(train_x.shape))
 print("train_y shape is {}".format( train_y.shape ))
 print("test_x shape is {}".format( test_x.shape ))
 print("test_y shape is {}".format( test_y.shape ))
@@ -142,7 +142,6 @@ plt.legend(['train', 'validation'], loc='upper left')
 plt.show()
 
 sample = train_x[np.random.randint(len(train_x))]
-
 
 batch = np.expand_dims(sample, axis=0)
 prediction = model.predict(batch)
